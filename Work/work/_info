@@ -1,0 +1,239 @@
+m255
+K3
+13
+cModel Technology
+dE:\YSYX\dig_logic\Sum_Sequence
+valu_control
+V`id^CjhJf4o5PYcnYkTDQ2
+r1
+31
+IAB6zOdXDWiWCOKD^1ag7;0
+Z0 dE:\YSYX\RISCV_CPU\Work
+w1758877984
+8E:/YSYX/RISCV_CPU/ALU_Control.v
+FE:/YSYX/RISCV_CPU/ALU_Control.v
+L0 4
+Z1 OL;L;10.1c;51
+Z2 o-work work -L mtiAvm -L mtiOvm -L mtiUvm -L mtiUPF
+!s85 0
+!s100 I=P67<eKBGmcza[ClI;H_1
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/ALU_Control.v|
+!s108 1760089785.528000
+!s107 E:/YSYX/RISCV_CPU/ALU_Control.v|
+!i10b 1
+valu_core
+VQ5;o^:8X9MGG]>87V9NH70
+r1
+31
+I2i5<>=XBfoIZI:k`2An;V1
+Z3 dE:\YSYX\RISCV_CPU\Work
+w1758878026
+8E:/YSYX/RISCV_CPU/ALU_Core.v
+FE:/YSYX/RISCV_CPU/ALU_Core.v
+L0 10
+R1
+R2
+!s85 0
+!s100 NmJD<SOIJHV>S0WHQoZeG2
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/ALU_Core.v|
+!s108 1760089785.586000
+!s107 E:/YSYX/RISCV_CPU/ALU_Core.v|
+!i10b 1
+valu_top
+VW0nf<7jVSW@_0dj2Qjjg[2
+r1
+31
+IlTd`Zz=FWN]i5:U9MKAQz3
+R3
+w1758878064
+8E:/YSYX/RISCV_CPU/ALU_Top.v
+FE:/YSYX/RISCV_CPU/ALU_Top.v
+L0 12
+R1
+R2
+!s85 0
+!s100 CZnK7SZ0z8<;<=16R]Xme0
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/ALU_Top.v|
+!s108 1760089785.617000
+!s107 E:/YSYX/RISCV_CPU/ALU_Top.v|
+!i10b 1
+vcpu_top
+V;z8<9=UYk5>bJ4<fDVb9b1
+r1
+31
+IR^b@=85YjWVG5DROD;h^_0
+R3
+w1760088690
+8E:/YSYX/RISCV_CPU/Top.v
+FE:/YSYX/RISCV_CPU/Top.v
+L0 4
+R1
+R2
+!s85 0
+!s100 ah2_YJ[HonZQzTI7:Ni=F2
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/Top.v|
+!s108 1760089785.865000
+!s107 E:/YSYX/RISCV_CPU/Top.v|
+!i10b 1
+vdecoder
+VN0hR>i4JZ0o4jlX@XNQJ92
+r1
+31
+IVmlT<YNVMBP]4kP>SP:ZE2
+R3
+w1758792107
+8E:/YSYX/RISCV_CPU/Decoder.v
+FE:/YSYX/RISCV_CPU/Decoder.v
+L0 14
+R1
+R2
+!s85 0
+!s100 :<ei_G8607gIl6Zd]7zc^0
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/Decoder.v|
+!s108 1760089785.706000
+!s107 E:/YSYX/RISCV_CPU/Decoder.v|
+!i10b 1
+vdmem
+ID@WJ50A`iKz9[dbTF7e7@3
+VjDhbX`Te8ViWRZDibTMU72
+R3
+w1759998005
+8E:/YSYX/RISCV_CPU/Data_Memory.v
+FE:/YSYX/RISCV_CPU/Data_Memory.v
+L0 9
+R1
+r1
+31
+R2
+!s100 Y7RR2n=O>[2nI:X_JKF932
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/Data_Memory.v|
+!s108 1760089785.676000
+!s107 E:/YSYX/RISCV_CPU/Data_Memory.v|
+!i10b 1
+!s85 0
+vif_stage
+VEobU>IIJBB>J;4:2@0^7b0
+r1
+31
+IVhQ[_Q?>IN=N9CXm^K2L]3
+R3
+Z4 w1760089392
+Z5 8E:/YSYX/RISCV_CPU/IMEM_IF.v
+Z6 FE:/YSYX/RISCV_CPU/IMEM_IF.v
+L0 50
+R1
+Z7 !s108 1760089785.735000
+Z8 !s107 E:/YSYX/RISCV_CPU/IMEM_IF.v|
+Z9 !s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/IMEM_IF.v|
+R2
+!s85 0
+!s100 [?i_QOKVXUTP]R:f[l9bZ1
+!i10b 1
+vimem
+VM4zHnlO3]noLBaKiFBCZK0
+r1
+31
+IhV`zHAPGZiRVg`<G>`0a:2
+R3
+R4
+R5
+R6
+L0 11
+R1
+R7
+R8
+R9
+R2
+!s85 0
+!s100 5KD3f[[PNk;Ii6`9mnZlL0
+!i10b 1
+vmem_branch_unit
+V4F[8=4JRBGdOAaECNP1gN1
+r1
+31
+I7Yl63G0Fzc6>M@^5DRA2Q1
+R3
+w1759131007
+8E:/YSYX/RISCV_CPU/branch_unit.v
+FE:/YSYX/RISCV_CPU/branch_unit.v
+L0 15
+R1
+R2
+!s85 0
+!s100 ln<>;0knfo3IBdaK?4<Q33
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/branch_unit.v|
+!s108 1760089785.644000
+!s107 E:/YSYX/RISCV_CPU/branch_unit.v|
+!i10b 1
+vpc_reg
+V_8f3ZFeIzR2Yf`ZFRa3J<0
+r1
+31
+I3Z]fk31hY3fgG_F6X]zRG2
+R3
+w1760089296
+8E:/YSYX/RISCV_CPU/PC_reg.v
+FE:/YSYX/RISCV_CPU/PC_reg.v
+L0 1
+R1
+R2
+!s85 0
+!s100 FW0YX@1P3]>;o683@aS[>0
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/PC_reg.v|
+!s108 1760089785.774000
+!s107 E:/YSYX/RISCV_CPU/PC_reg.v|
+!i10b 1
+vregfile
+VP59j2f_zm0zGUN::OnN_l3
+r1
+31
+I_Y=_iX493LP:GL^GPn8fk3
+R3
+w1758792754
+8E:/YSYX/RISCV_CPU/Regfile.v
+FE:/YSYX/RISCV_CPU/Regfile.v
+L0 8
+R1
+R2
+!s85 0
+!s100 gRK`f2SC_I:FPzdWMKg8A1
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/Regfile.v|
+!s108 1760089785.806000
+!s107 E:/YSYX/RISCV_CPU/Regfile.v|
+!i10b 1
+vtb_cpu_top
+VIo;@ZL6VNHzVHDaS;68PM1
+r1
+31
+Ij=aI@EUWWOERl3P@2Rm_R0
+R3
+w1760089783
+8E:/YSYX/RISCV_CPU/tb_cpu.v
+FE:/YSYX/RISCV_CPU/tb_cpu.v
+L0 2
+R1
+R2
+!s85 0
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/tb_cpu.v|
+!s100 G0nj>0fAZ:86I?Vc[HVd=0
+!s108 1760089785.836000
+!s107 E:/YSYX/RISCV_CPU/tb_cpu.v|
+!i10b 1
+vwb_controller
+V>_>h3]BAN]c15I[:df4D<0
+r1
+!s85 0
+31
+I5n=EYjX:lP2hfHc>E34]T2
+R3
+w1760088356
+8E:/YSYX/RISCV_CPU/WB_Control.v
+FE:/YSYX/RISCV_CPU/WB_Control.v
+L0 2
+R1
+R2
+!s100 I[:7BTbA0JE<ZG0gI7;m31
+!s90 -reportprogress|300|-work|work|-vopt|E:/YSYX/RISCV_CPU/WB_Control.v|
+!i10b 1
+!s108 1760089785.892000
+!s107 E:/YSYX/RISCV_CPU/WB_Control.v|
