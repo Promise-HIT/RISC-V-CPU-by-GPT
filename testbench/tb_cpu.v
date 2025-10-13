@@ -2,8 +2,8 @@
 module tb_cpu_top;
 
     // parameters must match cpu_top instantiation in your project
-    parameter IMEM_ADDR_WIDTH = 6;
-    parameter DMEM_ADDR_WIDTH = 6;
+    parameter IMEM_ADDR_WIDTH = 10;
+    parameter DMEM_ADDR_WIDTH = 10;
 
     // clock & reset
     reg clk;

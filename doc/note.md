@@ -1,31 +1,4 @@
-# 单周期 RV32I CPU 设计文档（完整回顾 ）
-
-
-# 目录
-
-- [单周期 RV32I CPU 设计文档（完整回顾 ）](#单周期-rv32i-cpu-设计文档完整回顾-)
-- [目录](#目录)
-  - [设计目标与总体架构](#设计目标与总体架构)
-  - [关键设计决策摘要](#关键设计决策摘要)
-  - [顶层模块：`cpu_top` 概览](#顶层模块cpu_top-概览)
-  - [模块详细说明（接口与设计要点）](#模块详细说明接口与设计要点)
-    - [`pc_reg`（PC 寄存器）](#pc_regpc-寄存器)
-    - [`imem` / `if_stage`（取指与指令存储）](#imem--if_stage取指与指令存储)
-    - [`decoder`（译码 / ID）](#decoder译码--id)
-    - [`regfile`（寄存器堆）](#regfile寄存器堆)
-    - [`alu_control`](#alu_control)
-    - [`alu_core`](#alu_core)
-    - [`alu_top`](#alu_top)
-    - [`mem_branch_unit` / `dmem`（分支判定 + 数据存储）](#mem_branch_unit--dmem分支判定--数据存储)
-    - [`wb_controller`（写回控制器） / `wb_mux`](#wb_controller写回控制器--wb_mux)
-  - [端到端数据流与信号走向（时序说明）](#端到端数据流与信号走向时序说明)
-  - [测试 / 仿真要点（含常见现象解释）](#测试--仿真要点含常见现象解释)
-  - [常见问题与调试建议](#常见问题与调试建议)
-  - [扩展方向与建议（流水线 / forwarding / 异步 DMEM 等）](#扩展方向与建议流水线--forwarding--异步-dmem-等)
-  - [参考：模块端口快速索引（可拷贝）](#参考模块端口快速索引可拷贝)
-  - [附录：小型测试程序示例（汇编 + 目的）](#附录小型测试程序示例汇编--目的)
-
----
+# 单周期 RV32I CPU 设计文档（重构完整版）
 
 ## 设计目标与总体架构
 
@@ -41,21 +14,23 @@
 * MEM（访存 & branch）: `mem_branch_unit`（包含 `dmem` 与分支判定逻辑）
 * WB（写回）: `wb_controller` + `wb_mux` 将 ALU/MEM/PC+4/LUI 等写回寄存器
 
-**注意点**
-
-* `dmem` 采同步读写（更接近 FPGA BlockRAM 行为）：load 的数据在 `mem_read` 后的下一个时钟上有效，`wb_controller` 处理这一延迟。
-* IF 的 `imem` 实现为组合读取（方便仿真教学），并支持 `$readmemh("imem.hex", mem)` 初始化。
+**重构要点（PC相关）**
+- **PC寄存器职责简化**：仅负责存储当前PC值，不参与任何计算逻辑
+- **IF阶段职责明确**：负责取指令和计算顺序执行的PC+4地址  
+- **顶层模块集中控制**：统一处理所有PC跳转决策，消除逻辑冲突
+- **消除冗余**：移除重复的PC+4计算，修复原有的逻辑冲突问题
 
 ---
 
 ## 关键设计决策摘要
 
-* **模块化**：将控制（decoder）、算术（alu_control/alu_core）、寄存器堆（regfile）、内存（dmem）分离，便于单元测试与扩展。
+* **模块化重构**：将PC计算逻辑从PC寄存器中分离，实现真正的单一职责原则
+* **集中控制**：所有PC跳转决策（JAL/JALR/分支/顺序执行）在顶层模块统一处理
 * **同步 DMEM**：选择同步 BRAM 风格的 DMEM 以便综合到 FPGA；缺点是 load 需要在下一周期写回。
 * **写回延迟处理**：`wb_controller` 对 load 指令做一周期延迟写回，以确保读到同步 DMEM 的返回。
 * **ALU 职责**：ALU 不解码指令类别；decoder 给出 `alu_op`/`alu_src`/`imm`，ALU 执行运算（Load/Store 时会执行 `ADD` 来计算地址）。
 * **分支判定**：ALU 提供 `zero/slt/sltu` 标志，`mem_branch_unit`（或单独 branch unit）根据 `funct3` 计算 `branch_taken`，`branch_target = pc + imm`。
-* **可扩展性**：设计预留空间用于流水线、forwarding、分支预测、CSR 扩展等。
+* **可扩展性**：清晰的PC处理流程为流水线化、分支预测、异常处理等扩展奠定良好基础。
 
 ---
 
@@ -63,9 +38,35 @@
 
 **职责**：实例化各子模块、连接信号、计算 `pc_next`（优先级：JAL > JALR > branch taken），协调 `wb_controller` 与同步 `dmem` 的时序。
 
+**重构后的PC处理逻辑**
+
+```verilog
+// ========================
+// 🎯 关键重构：统一的PC_next计算逻辑
+// ========================
+assign pc_next = (jump | jalr | (branch & branch_taken)) ? 
+                (jump  ? (pc + imm) :           // JAL指令
+                 jalr  ? jalr_target :          // JALR指令  
+                 branch_target) :               // 分支指令
+                pc_plus_4;                      // 顺序执行
+
+// 简化的PC寄存器实例化
+pc_reg u_pc_reg (
+    .clk(clk),
+    .rst_n(rst_n),
+    .pc_next(pc_next),    // 统一的下一个PC值
+    .pc(pc)
+);
+```
+
+**职责划分**
+- `pc_reg`：地址保管员，只负责安全存储
+- `if_stage`：指令获取员+顺序计算员，负责取指和计算PC+4
+- `cpu_top`：决策指挥官，综合分析决定下个PC值来源
+
 **关键连接（高层）**
 
-* `pc_reg`: 更新 PC（内部 +4 默认）
+* `pc_reg`: 更新 PC（使用外部计算的pc_next）
 * `if_stage` (imem): `inst = imem[pc >> 2]`，`pc_plus_4 = pc + 4`
 * `decoder`: `inst -> controls, imm, rd_eff, rs1_eff, rs2_eff`
 * `regfile`: `rs1_data, rs2_data`（组合读）；写端受 `wb_controller` 驱动
@@ -77,27 +78,27 @@
 
 ## 模块详细说明（接口与设计要点）
 
-> 每节包括接口声明摘要、功能、时序/实现要点与注意事项。
+### `pc_reg`（PC 寄存器）- **重构版**
 
-### `pc_reg`（PC 寄存器）
-
-**接口**
-
+**接口（简化）**
 ```verilog
 module pc_reg (
     input  clk,
     input  rst_n,
-    input  pc_src,
-    input  [31:0] pc_next,
-    output reg [31:0] pc
+    input [31:0] pc_next,    // 外部计算好的下一个PC值
+    output reg [31:0] pc     // 当前PC值
 );
 ```
 
-**功能与时序**
+**重构要点**
+- 移除内部PC+4计算逻辑
+- 移除`pc_src`选择信号
+- 纯时序逻辑，只做状态存储
+- 复位时从0地址开始执行
 
+**功能与时序**
 * 异步低有效复位：`pc <= 0`
-* `posedge clk`：如果 `pc_src` 则 `pc <= pc_next`，否则 `pc <= pc + 4`
-  **注意**
+* `posedge clk`：`pc <= pc_next`（直接使用外部计算值）
 * `pc` 为字节地址（与 `imem`/`dmem` 协调低两位取索引）
 
 ---
@@ -105,7 +106,6 @@ module pc_reg (
 ### `imem` / `if_stage`（取指与指令存储）
 
 **imem 接口**
-
 ```verilog
 module imem #(
     parameter ADDR_WIDTH = 10
@@ -116,7 +116,6 @@ module imem #(
 ```
 
 **if_stage 接口**
-
 ```verilog
 module if_stage #(
     parameter IMEM_ADDR_WIDTH = 10
@@ -131,7 +130,7 @@ module if_stage #(
 
 * 内部 `reg [31:0] mem[0:DEPTH-1]`，`word_index = addr[ADDR_WIDTH+1:2]`，`inst = mem[word_index]`（组合）。
 * 初始填充 NOP（`addi x0,x0,0`）并尝试 `$readmemh("imem.hex", mem)`。
-* 推荐在 `imem` 实例命名上保持一致（便于 TB 层次访问，如 `u_cpu.u_if_stage.imem.mem[i]`）。
+* 推荐在 `imem` 实例命名上保持一致（便于 TB 层次访问，如 `u_cpu.u_if_stage.imem0.mem[i]`）。
 
 **注意**
 
@@ -142,7 +141,6 @@ module if_stage #(
 ### `decoder`（译码 / ID）
 
 **端口（摘要）**
-
 ```verilog
 module decoder (
     input  wire [31:0] inst,
@@ -184,7 +182,6 @@ module decoder (
 ### `regfile`（寄存器堆）
 
 **接口**
-
 ```verilog
 module regfile (
     input  wire        clk,
@@ -213,7 +210,6 @@ module regfile (
 ### `alu_control`
 
 **接口**
-
 ```verilog
 module alu_control (
     input  wire [2:0] alu_op,
@@ -238,7 +234,6 @@ module alu_control (
 ### `alu_core`
 
 **接口**
-
 ```verilog
 module alu_core (
     input  wire [31:0] op1,
@@ -266,7 +261,6 @@ module alu_core (
 ### `alu_top`
 
 **接口**
-
 ```verilog
 module alu_top (
     input  wire [2:0]  alu_op,
@@ -297,7 +291,6 @@ module alu_top (
 ### `mem_branch_unit` / `dmem`（分支判定 + 数据存储）
 
 **接口（mem_branch_unit 概览）**
-
 ```verilog
 module mem_branch_unit #(
     parameter IMEM_ADDR_WIDTH = 10
@@ -324,7 +317,6 @@ module mem_branch_unit #(
 ```
 
 **dmem（内部）接口**
-
 ```verilog
 module dmem #(
     parameter ADDR_WIDTH = 10
@@ -358,7 +350,6 @@ module dmem #(
 ### `wb_controller`（写回控制器） / `wb_mux`
 
 **wb_mux（组合）**
-
 ```verilog
 module wb_mux (
     input  wire [1:0] wb_sel,
@@ -371,7 +362,6 @@ module wb_mux (
 ```
 
 **wb_controller（时序）**
-
 ```verilog
 module wb_controller (
     input  wire        clk,
@@ -402,38 +392,59 @@ module wb_controller (
 
 ---
 
-## 端到端数据流与信号走向（时序说明）
+## 端到端数据流与信号走向（重构后时序）
 
-**指令周期（单周期展开）**
+**重构后的指令周期**
 
+1. **IF阶段**：
+   - `pc_reg`输出当前地址 → `if_stage`取指令并计算`pc_plus_4`
+   
+2. **ID阶段**：
+   - `decoder`解析指令，产生控制信号
+
+3. **EX/MEM阶段**：
+   - ALU执行运算，内存访问，分支判断
+
+4. **PC决策阶段**（顶层）：
+   - 综合分析所有控制信号（jump/jalr/branch_taken）
+   - 计算`pc_next`：`跳转目标 ? pc_plus_4`
+
+5. **PC更新**：
+   - 时钟上升沿，`pc_reg`更新为`pc_next`
+
+**关键改进**
+- 消除原来`pc_src=0`时的逻辑冲突
+- PC计算逻辑集中，便于维护和调试
+- 为流水线化打下良好基础
+
+**完整数据流**
 1. IF: `pc` -> `if_stage.imem` -> `inst`；`pc_plus_4 = pc + 4`
 2. ID: `decoder(inst)` -> control signals + `imm` + register indices -> `rs1_eff/rs2_eff/rd_eff`
 3. RF read: `regfile` 输出 `rs1_data`, `rs2_data`（组合）
 4. EX: `alu_top` 接收 `rs1_data`, `op2 = alu_src ? imm : rs2_data` -> `alu_result`, flags
-
    * 对 `L/S`: `alu_op` 被 decoder 设为 ADD 类 -> `alu_result = rs1 + imm`（地址）
 5. MEM: `mem_branch_unit`:
-
    * Branch: use `zero/slt/sltu` + `branch_type` -> `branch_taken` and branch target `pc + imm`
    * Data: `addr = alu_result`, `write_data = rs2_data`, `mem_write`/`mem_read` 控制 `dmem`
    * `dmem.read_data` 在 `mem_read` 后 **下一个 posedge clk** 有效（同步）
 6. WB: `wb_controller`:
-
    * Non-load: select ALU/PC+4/LUI -> write `rd` this cycle (writing occurs at next posedge)
    * Load: stage `rd` and write in next cycle using `mem_read_data` (ensures `dmem` 输出有效)
 
 **PC 更新**
-
-* `pc_src = jump | jalr | (branch & branch_taken)`
-* `pc_next` chosen by priority: `jump ? pc + imm : jalr ? ((rs1 + imm) & ~1) : branch_target`
-* `pc_reg` 内部若 `pc_src==0` 则 `pc <= pc + 4`（实现简化）
+* `pc_next` chosen by priority: `jump ? pc + imm : jalr ? ((rs1 + imm) & ~1) : branch_taken ? branch_target : pc_plus_4`
 
 ---
 
-## 测试 / 仿真要点（含常见现象解释）
+## 测试 / 仿真要点（重构验证）
+
+**重构验证重点**
+- 验证顺序执行：PC是否正确+4递增
+- 验证跳转指令：JAL/JALR是否跳转到正确目标
+- 验证分支指令：条件分支是否根据标志正确跳转
+- 验证优先级：JAL > JALR > Branch > 顺序执行的优先级
 
 **小测试程序（示例）**
-
 ```
 addi x1, x0, 4       ; x1 = 4
 addi x2, x0, 10      ; x2 = 10
@@ -444,17 +455,14 @@ addi x4, x3, 1       ; x4 = x3 + 1 ; may read old x3 if no NOP/stall
 ```
 
 **关键仿真现象解释**
-
 * **Load 延迟**：因为 `dmem` 为同步读，`lw` 发出 `mem_read` 后 `read_data` 在下一 posedge 可用；如果下一条指令**立即**使用 `rd`（load-use），它会看到旧值，除非插入 NOP 或实现 forwarding/stall。
 * **Store 写入能看到时机**：`sw` 在其周期的 posedge 写入内存，之后读回会看到更新（取决于时序和优先策略）。
 * **如何让 `addi x4, x3,1` 看到 `lw` 的结果？**
-
   * 在 `lw` 与 `addi` 之间插入 NOP（教学常用）；或者
   * 将 DMEM 改为组合读（仅教学仿真，不适合综合）；或者
   * 改为流水线 + forwarding/load-use stall 机制。
 
 **Testbench / 仿真注意**
-
 * 在 TB 中通过层次访问 `imem`/`dmem` 内部 `mem` 时确保实例名称与层次匹配（例如 `u_cpu.u_if_stage.imem.mem[i]` 或 `u_cpu.u_if_stage.imem0.mem[i]`，取决于你实例命名）。
 * `imem` 内部的 `$readmemh("imem.hex", mem)` 如果文件不存在会发出警告，但层次赋值依然可用以覆盖内容。
 * 打印寄存器状态时，若要显示刚写入的数据，应在 `@(posedge clk)` 中打印（因为写在 posedge 发生）。
@@ -463,16 +471,33 @@ addi x4, x3, 1       ; x4 = x3 + 1 ; may read old x3 if no NOP/stall
 
 ## 常见问题与调试建议
 
+**重构后可能遇到的问题**
+- **PC不更新**：检查`pc_next`计算逻辑，确认跳转条件是否正确
+- **错误跳转**：验证`jump`/`jalr`/`branch_taken`信号的产生时机
+- **顺序执行失败**：确认`pc_plus_4`计算是否正确连接到`pc_next`
+
+**通用调试建议**
 * **仿真报层次未找到 `imem` 或 `mem`**：检查 `if_stage` 中 `imem` 的实例名（`imem0` 或 `imem`），并在 TB 使用正确路径（例如 `u_cpu.u_if_stage.imem0.mem`）。
 * **看不到 lw 的返回值 / x4 未按预期变化**：确认 `dmem` 是同步还是组合读；若同步，记住 `read_data` 在下一 posedge 才有效，插入 NOP 或改变设计策略。
 * **寄存器写入边沿看不到值**：寄存器写在 posedge 执行，打印寄存器状态要在 posedge 之后读取或在 `#1` 延迟后打印。
 * **imem.hex 未找到警告**：若用层次赋值初始化 IMEM，此警告可以忽略；或在工程运行目录放置 `imem.hex` 消除警告。
 * **部分写（sb/sh）行为不正确**：先验证 `addr[1:0]` 偏移处理是否与预期（小端），并检查 read-modify-write merge 逻辑。
 
+**调试建议**
+- 在顶层添加PC决策的调试输出
+- 监控关键控制信号：`jump`, `jalr`, `branch_taken`
+- 验证`pc_next`在多路选择器各路径的值
+
 ---
 
-## 扩展方向与建议（流水线 / forwarding / 异步 DMEM 等）
+## 扩展方向与建议
 
+**重构带来的优势**
+- **流水线化准备**：清晰的PC处理流程便于添加流水线寄存器
+- **分支预测**：集中的PC决策逻辑便于集成分支预测器
+- **异常处理**：统一的PC计算便于添加异常处理机制
+
+**扩展方向**
 * **流水线化（5-stage）**：IF / ID / EX / MEM / WB 拆分，需加入寄存器（IF/ID, ID/EX, EX/MEM, MEM/WB），并实现 forwarding 单元与 hazard detection 单元（处理 load-use hazard）。
 * **Forwarding**：当 EX 需要上一条或两条指令的 ALU 结果时，从 EX/MEM 或 MEM/WB 转发到 EX 的操作数以避免插入停顿（除 load-use）。
 * **Load-use stall**：在检测到 EX 需要依赖 MEM（load）的数据时暂停 IF/ID 并插入 bubble。
@@ -482,16 +507,19 @@ addi x4, x3, 1       ; x4 = x3 + 1 ; may read old x3 if no NOP/stall
 
 ---
 
-## 参考：模块端口快速索引（可拷贝）
+## 参考：模块端口快速索引（更新版）
 
-* `pc_reg`:
-
+### `pc_reg` - **重构版**
 ```verilog
-module pc_reg (input clk, input rst_n, input pc_src, input [31:0] pc_next, output reg [31:0] pc);
+module pc_reg (
+    input  clk,
+    input  rst_n,
+    input [31:0] pc_next,    // 统一的下一个PC值
+    output reg [31:0] pc     // 当前PC值
+);
 ```
 
-* `if_stage` / `imem`:
-
+### `if_stage` / `imem`
 ```verilog
 module if_stage #(parameter IMEM_ADDR_WIDTH=10) (
     input wire [31:0] pc,
@@ -505,8 +533,7 @@ module imem #(parameter ADDR_WIDTH=10) (
 );
 ```
 
-* `decoder`（摘要）
-
+### `decoder`（摘要）
 ```verilog
 module decoder (
     input wire [31:0] inst,
@@ -531,8 +558,7 @@ module decoder (
 );
 ```
 
-* `regfile`
-
+### `regfile`
 ```verilog
 module regfile (
     input  wire clk, input wire rst_n,
@@ -543,16 +569,14 @@ module regfile (
 );
 ```
 
-* `alu_control` / `alu_core` / `alu_top` quick
-
+### ALU相关模块
 ```verilog
 module alu_control (input wire [2:0] alu_op, input wire [2:0] funct3, input wire [6:0] funct7, output reg [3:0] alu_ctrl);
 module alu_core (input wire [31:0] op1, input wire [31:0] op2, input wire [3:0] alu_ctrl, output reg [31:0] result, output wire zero, slt, sltu);
 module alu_top (input wire [2:0] alu_op, input wire [2:0] funct3, input wire [6:0] funct7, input wire [31:0] rs1_data, rs2_data, imm, input wire alu_src, output wire [31:0] alu_result, output wire zero, slt, sltu);
 ```
 
-* `mem_branch_unit` / `dmem`（摘要）
-
+### `mem_branch_unit` / `dmem`（摘要）
 ```verilog
 module mem_branch_unit #(parameter IMEM_ADDR_WIDTH=10) (
     input wire clk, rst_n,
@@ -578,14 +602,21 @@ module dmem #(parameter ADDR_WIDTH=10) (
 );
 ```
 
-* `wb_controller` / `wb_mux`
-
+### `wb_controller` / `wb_mux`
 ```verilog
 module wb_mux (input wire [1:0] wb_sel, input wire [31:0] alu_result, mem_read_data, pc_plus_4, imm_u_shifted, output reg [31:0] wb_data);
 
 module wb_controller (input wire clk, rst_n, input wire dec_reg_write, input wire [1:0] dec_wb_sel, input wire [4:0] dec_rd,
     input wire [31:0] dec_imm_u, input wire [31:0] alu_result, mem_read_data, pc_plus_4,
     output reg rf_we, output reg [4:0] rf_wd_idx, output reg [31:0] rf_wd_data);
+```
+
+### 顶层PC计算逻辑 - **新增说明**
+```verilog
+// 在cpu_top中的关键逻辑
+assign pc_next = (jump | jalr | (branch & branch_taken)) ? 
+                (jump ? (pc + imm) : jalr ? jalr_target : branch_target) : 
+                pc_plus_4;
 ```
 
 ---
@@ -603,4 +634,12 @@ nop                # 插入 NOP 以等待 load 完成（或用流水线/forwardi
 addi x4, x3, 1     # x4 = x3 + 1  (若 NOP 存在 x4 = 11)
 ```
 
+## 总结
 
+这次重构实现了：
+1. ✅ **职责分离**：PC存储、指令获取、跳转决策各司其职
+2. ✅ **逻辑清晰**：消除冗余计算和冲突逻辑
+3. ✅ **易于维护**：PC相关逻辑集中，便于调试和扩展
+4. ✅ **架构优化**：为后续流水线化奠定良好基础
+
+重构后的设计更加符合现代CPU设计的模块化、流水线友好原则，解决了原有设计中PC寄存器内部逻辑与顶层控制逻辑的冲突问题。
