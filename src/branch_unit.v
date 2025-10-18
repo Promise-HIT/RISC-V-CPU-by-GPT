@@ -1,70 +1,52 @@
-// mem_branch_unit.v
-// Combined Branch Unit + Data Memory for RV32I single-cycle datapath (synchronous DMEM).
-// - Branch: combinational branch_taken and branch_target = pc + imm
-// - Data Memory: synchronous read/write on posedge clk, read_data is registered
-// - Supports byte/half/word accesses and sign/zero extension for loads
-// - Parameterizable depth by word-address bits (ADDR_WIDTH)
-//
-// Notes:
-//  - addr is a byte address; internal memory is word-addressed (word = 32-bit).
-//  - read_data is valid in the clock cycle AFTER mem_read is asserted (synchronous read).
-//  - For stores, partial writes (byte/half) are supported via read-modify-write.
-//
-// Author: ChatGPT (based on user's datapath design)
+// mem_branch_unit.v  -- merged: branch logic + DMEM (sync write, combinational read)
+// - synchronous writes on posedge clk (blocking assignment to help simulation write-through)
+// - combinational read (read_data computed from mem[word_index])
+// - branch_target and branch_taken remain combinational (as original)
+// Note: Parameter name kept as IMEM_ADDR_WIDTH for compatibility with your cpu_top instantiation.
 `timescale 1ns/1ps
 module mem_branch_unit #(
-    parameter IMEM_ADDR_WIDTH = 10  // number of word-address bits -> DEPTH = 2^ADDR_WIDTH words
+    parameter DMEM_ADDR_WIDTH = 10  // number of word-address bits -> DEPTH = 2^ADDR_WIDTH words
 ) (
     input  wire        clk,
     input  wire        rst_n,
 
-    // --- Branch inputs
-    input  wire [31:0] pc,          // current pc (for branch target calculation)
-    input  wire [31:0] imm,         // B-type immediate (already assembled in ID)
-    input  wire        branch,      // branch instruction indicator (from decoder)
-    input  wire [2:0]  branch_type, // funct3 for branch type (BEQ/BNE/BLT/...)
-    input  wire        zero,        // ALU zero flag (op1 - op2 == 0)
-    input  wire        slt,         // ALU signed less (op1 < op2 signed)
-    input  wire        sltu,        // ALU unsigned less (op1 < op2 unsigned)
+    // Branch inputs
+    input  wire [31:0] pc,
+    input  wire [31:0] imm,
+    input  wire        branch,
+    input  wire [2:0]  branch_type,
+    input  wire        zero,
+    input  wire        slt,
+    input  wire        sltu,
 
-    // --- Memory interface (from EX stage / datapath)
-    input  wire [31:0] addr,        // byte address (usually ALU result)
-    input  wire [31:0] write_data,  // data to write (from rs2)
+    // Memory interface (from EX)
+    input  wire [31:0] addr,        // byte address
+    input  wire [31:0] write_data,  // rs2
     input  wire        mem_read,    // load enable
     input  wire        mem_write,   // store enable
     input  wire [1:0]  mem_width,   // 00=byte,01=half,10=word
-    input  wire        mem_signed,  // for loads: 1 => sign-extend, 0 => zero-extend
+    input  wire        mem_signed,  // load sign extend
 
-    // --- Outputs
-    output wire [31:0] branch_target, // pc + imm (combinational)
-    output reg         branch_taken,  // combinational result (registered for stable view if desired)
-    output reg  [31:0] read_data      // synchronous read data (valid next cycle after mem_read)
+    // Outputs
+    output wire [31:0] branch_target,
+    output wire        branch_taken, // combinational
+    output reg  [31:0] read_data     // combinational read_data (computed in always @(*))
 );
 
-    // Memory depth and index calculation:
-    localparam DEPTH = (1 << IMEM_ADDR_WIDTH);
+    localparam DEPTH = (1 << DMEM_ADDR_WIDTH);
 
-    // storage: word-addressable memory
+    // word-addressable memory
     reg [31:0] mem [0:DEPTH-1];
     integer i;
 
-    // convert byte address to word index (use ADDR_WIDTH parameter)
-    wire [IMEM_ADDR_WIDTH-1:0] word_index;
-    assign word_index = addr[IMEM_ADDR_WIDTH+1:2];
-
-    // byte offset inside the word
+    // index and offsets
+    wire [DMEM_ADDR_WIDTH-1:0] word_index = addr[DMEM_ADDR_WIDTH+1:2];
     wire [1:0] byte_offset = addr[1:0];
 
-    // combinational branch target
+    // branch target (simple PC + imm)
     assign branch_target = pc + imm;
 
-    // combinational branch_taken logic (based on branch_type & ALU flags)
-    // BEQ  funct3 = 3'b000
-    // BNE         = 3'b001
-    // BLT         = 3'b100
-    // BGE         = 3'b101
-    // BLTU        = 3'b110
-    // BGEU        = 3'b111
+    // branch condition decoding (same as your original)
     wire cond_beq  = zero;
     wire cond_bne  = ~zero;
     wire cond_blt  = slt;
@@ -72,8 +54,7 @@ module mem_branch_unit #(
     wire cond_bltu = sltu;
     wire cond_bgeu = ~sltu;
 
-    wire branch_condition;
-    assign branch_condition = (branch) ? (
+    wire branch_condition = (branch) ? (
         (branch_type == 3'b000) ? cond_beq  :
         (branch_type == 3'b001) ? cond_bne  :
         (branch_type == 3'b100) ? cond_blt  :
@@ -83,134 +64,96 @@ module mem_branch_unit #(
         1'b0
     ) : 1'b0;
 
-    // update branch_taken as combinational->registered (gives stable view at posedge)
-    always @(*) begin
-        branch_taken = branch_condition;
-    end
+    assign branch_taken = branch_condition;
 
-    // ---------- Memory initialization ----------
+    // initialize memory (optional $readmemh)
     initial begin
-        for (i = 0; i < DEPTH; i = i + 1) begin
-            mem[i] = 32'h0000_0000;
-        end
-        // optional: try to preload with file "dmem.hex" (one 32-bit word per line)
-        // $readmemh("dmem.hex", mem);
+        for (i = 0; i < DEPTH; i = i + 1) mem[i] = 32'h0000_0000;
+        // try to load dmem.hex if present
+        $readmemh("dmem.hex", mem);
     end
 
-    // helper signals for read/write operations
-    reg [31:0] word_r;          // read raw 32-bit word from mem
-    reg [31:0] word_new;        // new word for write (after merging bytes)
+    // Temporary word for combinational extraction
+    reg [31:0] word_r;
 
-    // synchronous memory read/write (posedge clk or async reset)
+    // Synchronous WRITE (posedge). Using blocking assignment here to make the update
+    // immediately visible inside the same simulation time-step for combinational read.
+    // This is simulation-friendly; for synthesis target you may prefer non-blocking
+    // and a memory primitive with appropriate read/write semantics.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // reset read_data to zero on async reset
-            read_data <= 32'b0;
+            // reset memory to zero on reset (optional, but matches original behavior)
+            for (i = 0; i < DEPTH; i = i + 1) begin
+                mem[i] = 32'h00000000;
+            end
         end else begin
-            // WRITE: perform store if enabled (write happens first in this cycle)
             if (mem_write) begin
-                // read current word to merge partial writes
-                word_r = mem[word_index];
                 case (mem_width)
                     2'b10: begin
-                        // word write (aligned or not) - write full 32-bit
-                        mem[word_index] <= write_data;
+                        // SW (word)
+                        mem[word_index] = write_data;
                     end
                     2'b01: begin
-                        // half-word write (16-bit) - place at offset 0 or 2
+                        // SH (halfword)
+                        // merge depending on byte_offset (only offsets 0 or 2 allowed for aligned halfwords)
                         case (byte_offset)
-                            2'b00: word_new = {word_r[31:16], write_data[15:0]};
-                            2'b10: word_new = {write_data[15:0], word_r[15:0]};
-                            default: word_new = word_r; // unaligned half - ignore or handle
+                            2'b00: mem[word_index] = {mem[word_index][31:16], write_data[15:0]};
+                            2'b10: mem[word_index] = {write_data[15:0], mem[word_index][15:0]};
+                            default: mem[word_index] = mem[word_index];
                         endcase
-                        mem[word_index] <= word_new;
                     end
                     2'b00: begin
-                        // byte write - place in appropriate byte lane
+                        // SB (byte)
                         case (byte_offset)
-                            2'b00: word_new = {word_r[31:8], write_data[7:0]};
-                            2'b01: word_new = {word_r[31:16], write_data[7:0], word_r[7:0]};
-                            2'b10: word_new = {word_r[31:24], write_data[7:0], word_r[15:0]};
-                            2'b11: word_new = {write_data[7:0], word_r[23:0]};
-                            default: word_new = word_r;
+                            2'b00: mem[word_index] = {mem[word_index][31:8],  write_data[7:0]};
+                            2'b01: mem[word_index] = {mem[word_index][31:16], write_data[7:0], mem[word_index][7:0]};
+                            2'b10: mem[word_index] = {mem[word_index][31:24], write_data[7:0], mem[word_index][15:0]};
+                            2'b11: mem[word_index] = {write_data[7:0],  mem[word_index][23:0]};
+                            default: mem[word_index] = mem[word_index];
                         endcase
-                        mem[word_index] <= word_new;
                     end
-                    default: mem[word_index] <= mem[word_index];
+                    default: mem[word_index] = mem[word_index];
                 endcase
             end
+        end
+    end
 
-            // READ: synchronous read -- data becomes available in read_data next cycle
-            if (mem_read) begin
-                word_r = mem[word_index];
-                // extract according to width and sign flag
-                case (mem_width)
-                    2'b10: begin
-                        // word
-                        read_data <= word_r;
-                    end
-                    2'b01: begin
-                        // half-word
-                        case (byte_offset)
-                            2'b00: begin
-                                if (mem_signed)
-                                    read_data <= {{16{word_r[15]}}, word_r[15:0]}; // sign-extend
-                                else
-                                    read_data <= {{16{1'b0}}, word_r[15:0]};        // zero-extend
-                            end
-                            2'b10: begin
-                                if (mem_signed)
-                                    read_data <= {{16{word_r[31]}}, word_r[31:16]};
-                                else
-                                    read_data <= {{16{1'b0}}, word_r[31:16]};
-                            end
-                            default: begin
-                                // unaligned half-word - choose lower half by default
-                                if (mem_signed)
-                                    read_data <= {{16{word_r[15]}}, word_r[15:0]};
-                                else
-                                    read_data <= {{16{1'b0}}, word_r[15:0]};
-                            end
-                        endcase
-                    end
-                    2'b00: begin
-                        // byte
-                        case (byte_offset)
-                            2'b00: begin
-                                if (mem_signed)
-                                    read_data <= {{24{word_r[7]}},  word_r[7:0]};
-                                else
-                                    read_data <= {{24{1'b0}},       word_r[7:0]};
-                            end
-                            2'b01: begin
-                                if (mem_signed)
-                                    read_data <= {{24{word_r[15]}}, word_r[15:8]};
-                                else
-                                    read_data <= {{24{1'b0}},       word_r[15:8]};
-                            end
-                            2'b10: begin
-                                if (mem_signed)
-                                    read_data <= {{24{word_r[23]}}, word_r[23:16]};
-                                else
-                                    read_data <= {{24{1'b0}},       word_r[23:16]};
-                            end
-                            2'b11: begin
-                                if (mem_signed)
-                                    read_data <= {{24{word_r[31]}}, word_r[31:24]};
-                                else
-                                    read_data <= {{24{1'b0}},       word_r[31:24]};
-                            end
-                            default: begin
-                                read_data <= 32'b0;
-                            end
-                        endcase
-                    end
-                    default: read_data <= word_r;
-                endcase
-            end else begin
-                // if not reading, keep previous read_data (or optionally zero)
-                read_data <= read_data;
-            end
+    // Combinational read_data extraction (immediate combinational output)
+    always @(*) begin
+        // default
+        read_data = 32'b0;
+        word_r = mem[word_index];
+
+        if (mem_read) begin
+            case (mem_width)
+                2'b10: begin
+                    // LW
+                    read_data = word_r;
+                end
+                2'b01: begin
+                    // LH / LHU (halfword) - handle offsets 0 or 2 (but generalize)
+                    case (byte_offset)
+                        2'b00: read_data = mem_signed ? {{16{word_r[15]}}, word_r[15:0]} : {{16{1'b0}}, word_r[15:0]};
+                        2'b10: read_data = mem_signed ? {{16{word_r[31]}}, word_r[31:16]}: {{16{1'b0}}, word_r[31:16]};
+                        default: read_data = mem_signed ? {{16{word_r[15]}}, word_r[15:0]} : {{16{1'b0}}, word_r[15:0]};
+                    endcase
+                end
+                2'b00: begin
+                    // LB / LBU (byte)
+                    case (byte_offset)
+                        2'b00: read_data = mem_signed ? {{24{word_r[7]}},  word_r[7:0]}  : {{24{1'b0}}, word_r[7:0]};
+                        2'b01: read_data = mem_signed ? {{24{word_r[15]}}, word_r[15:8]} : {{24{1'b0}}, word_r[15:8]};
+                        2'b10: read_data = mem_signed ? {{24{word_r[23]}}, word_r[23:16]}: {{24{1'b0}}, word_r[23:16]};
+                        2'b11: read_data = mem_signed ? {{24{word_r[31]}}, word_r[31:24]}: {{24{1'b0}}, word_r[31:24]};
+                        default: read_data = 32'b0;
+                    endcase
+                end
+                default: read_data = word_r;
+            endcase
+        end else begin
+            // if no read, read_data may be left as zero or reflect memory content;
+            // we keep it zero to avoid unintended writeback when mem_read==0
+            read_data = 32'b0;
         end
     end
 

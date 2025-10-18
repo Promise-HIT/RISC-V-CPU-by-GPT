@@ -1,3 +1,4 @@
+// cpu_top_single.v  (single-cycle wiring)  -- corrected
 `timescale 1ns/1ps
 module cpu_top #(
     parameter IMEM_ADDR_WIDTH = 10,
@@ -8,23 +9,19 @@ module cpu_top #(
     output wire [31:0] dbg_pc
 );
 
-    // -------------------------
     // IF / PC
-    // -------------------------
     wire [31:0] pc;
-    wire [31:0] pc_next;      // 统一的下一个PC值
+    wire [31:0] pc_next;
     wire [31:0] inst;
-    wire [31:0] pc_plus_4;    // 顺序执行地址
+    wire [31:0] pc_plus_4;
 
-    // 简化的PC寄存器
     pc_reg u_pc_reg (
         .clk(clk),
         .rst_n(rst_n),
-        .pc_next(pc_next),    // 统一的下一个PC值
+        .pc_next(pc_next),
         .pc(pc)
     );
 
-    // IF阶段
     if_stage #(.IMEM_ADDR_WIDTH(IMEM_ADDR_WIDTH)) u_if_stage (
         .pc(pc),
         .inst(inst),
@@ -33,9 +30,7 @@ module cpu_top #(
 
     assign dbg_pc = pc;
 
-    // -------------------------
-    // ID / Decoder (保持不变)
-    // -------------------------
+    // ID / Decoder
     wire [6:0]  opcode;
     wire [2:0]  funct3;
     wire [6:0]  funct7;
@@ -87,9 +82,7 @@ module cpu_top #(
         .illegal(illegal)
     );
 
-    // -------------------------
-    // Register file (保持不变)
-    // -------------------------
+    // Register file (modified version with write-through)
     wire [31:0] rs1_data, rs2_data;
     wire        rf_we;
     wire [4:0]  rf_wd_idx;
@@ -107,9 +100,7 @@ module cpu_top #(
         .rs2_data(rs2_data)
     );
 
-    // -------------------------
-    // ALU stage (保持不变)
-    // -------------------------
+    // ALU (use rs1_data / rs2_data, AUIPC handled in alu_op1)
     wire [31:0] alu_result;
     wire        zero_flag, slt_flag, sltu_flag;
     wire [31:0] alu_op1 = auipc ? pc : rs1_data;
@@ -128,16 +119,19 @@ module cpu_top #(
         .sltu(sltu_flag)
     );
 
-    // -------------------------
-    // MEM + Branch unit (保持不变)
-    // -------------------------
+    // MEM (merged DMEM + branch unit) -- CORRECTED instantiation
+    wire [31:0] mem_read_data;
     wire [31:0] branch_target;
     wire        branch_taken;
-    wire [31:0] mem_read_data;
 
-    mem_branch_unit #(.IMEM_ADDR_WIDTH(DMEM_ADDR_WIDTH)) u_mem_branch (
+    mem_branch_unit #(
+        .DMEM_ADDR_WIDTH(DMEM_ADDR_WIDTH)   // correct named parameter override
+    ) u_mem_branch (
+        // clock / reset
         .clk(clk),
         .rst_n(rst_n),
+
+        // branch inputs
         .pc(pc),
         .imm(imm),
         .branch(branch),
@@ -145,38 +139,36 @@ module cpu_top #(
         .zero(zero_flag),
         .slt(slt_flag),
         .sltu(sltu_flag),
+
+        // mem interface (from EX)
         .addr(alu_result),
         .write_data(rs2_data),
         .mem_read(mem_read),
         .mem_write(mem_write),
         .mem_width(mem_width),
         .mem_signed(mem_signed),
+
+        // outputs
         .branch_target(branch_target),
         .branch_taken(branch_taken),
         .read_data(mem_read_data)
     );
 
-    // -------------------------
-    // JALR目标计算 (保持不变)
-    // -------------------------
+    // JALR target
     wire [31:0] jalr_target = (rs1_data + imm) & 32'hFFFF_FFFE;
 
-    assign pc_next = (jump | jalr | (branch & branch_taken)) ? 
-                    (jump  ? (pc + imm) :           // JAL指令
-                     jalr  ? jalr_target :          // JALR指令  
-                     branch_target) :               // 分支指令
-                    pc_plus_4;                      // 顺序执行
+    // pc_next: use branch_taken from mem_branch_unit
+    assign pc_next = (jump ? (pc + imm) :
+                     (jalr ? jalr_target :
+                     ((branch && branch_taken) ? branch_target :
+                      pc_plus_4)));
 
-    // -------------------------
-    // Writeback controller (保持不变)
-    // -------------------------
-    wb_controller u_wb_ctrl (
-        .clk(clk),
-        .rst_n(rst_n),
+    // Writeback: single-cycle combinational controller (directly uses decoder/reg/alu/mem)
+    wb_controller_single u_wb_ctrl (
         .dec_reg_write(reg_write),
         .dec_wb_sel(wb_sel),
         .dec_rd(rd_eff),
-        .dec_imm_u(imm),
+        .dec_imm_u(imm),          // for LUI: decoder already applied shift in imm
         .alu_result(alu_result),
         .mem_read_data(mem_read_data),
         .pc_plus_4(pc_plus_4),
