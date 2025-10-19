@@ -1,4 +1,3 @@
-`timescale 1ns/1ps
 // decoder.v
 // Decoder / ID stage for single-cycle RV32I CPU (improved).
 // - Outputs raw field slices, valid flags, and effective register indices (zeroed when invalid).
